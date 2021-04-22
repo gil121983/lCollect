@@ -1,0 +1,92 @@
+#!/bin/bash
+#       	logsCollector - Collecting logs from your cloud instance
+#			 feeding tool for logs agrigation
+#       Authors: Gil Stolar
+#       OUR ORIGINAL CODE THAT WAS WRITTEN BY THE SECOPX LTD TEAM IS RELEASED UNDER GPL3!       
+#       Copyright (C) 2021 Secopx.com
+
+VERSION="1.0"
+
+. lcollect.conf
+### overide variables from .conf file for testings
+#CONTAINER_ENV="docker"
+#SYSLOGi_FILE="/var/log/syslog"
+SINCE="60 min ago" ## new variable - add to secopx.conf
+###
+
+## Break operation if there are missing parameters
+if [  "${CONTAINER_ENV}" == "" ];then echo "ERROR Missing argument: CONTAINER ENVIRONMENT"; exit 0; fi
+
+## Initialize
+PROC_START="$(date +%s).$(date +%3N)"
+#INTERVAL=$(date "+%FT%T" -d "${SINCE}") 
+#echo $INTERVAL; exit 0;
+
+function stolarize { ## Adding :lables: to logs ## 
+        echo "$1" > ${TMPFILE}
+        if [[ $1 != "" ]];then sed -i -e "s/^/$2 /" ${TMPFILE};fi
+}
+
+LOGDIR="$(pwd)/logs"
+LOGFILE="${LOGDIR}/main_log.xml"
+ACCESS_LOG_FILE="${LOGDIR}/access.log"
+ERROR_LOG_FILE="${LOGDIR}/error.log"
+GRYPE_LOG_FILE="${LOGDIR}/grype.log"
+GRYPE_JSON="${LOGDIR}/grype.json"
+BENCH_LOG="${LOGDIR}/bench.log"
+FALCO_LOG_FILE="${LOGDIR}/falco.log"
+OPA_LOG_FILE="${LOGDIR}/opa.log"
+TMPFILE="${LOGDIR}/lclt_1.tmp"
+TMPFILE2="${LOGDIR}/lclt_2.tmp"
+
+if [ ! -d $LOGDIR ];then mkdir $LOGDIR;fi
+if [ ! -f $LOGFILE ]; then touch $LOGFILE; else echo "" >$LOGFILE; fi
+if [ ! -f $TMPFILE ]; then touch $TMPFILE; else echo "" >$TMPFILE; fi
+if [ ! -f $TMPFILE2 ]; then touch $TMPFILE2; else echo "" >$TMPFILE2; fi
+if [ ! -f $ACCESS_LOG_FILE ]; then touch $ACCESS_LOG_FILE; else echo "" >$ACCESS_LOG_FILE; fi
+if [ ! -f $ERROR_LOG_FILE ]; then touch $ERROR_LOG_FILE; else echo "" >$ERROR_LOG_FILE; fi
+if [ ! -f $FALCO_LOG_FILE ]; then touch $FALCO_LOG_FILE; else echo "" >$FALCO_LOG_FILE; fi
+if [ ! -f $OPA_LOG_FILE ]; then touch $OPA_LOG_FILE; else echo "" >$OPA_LOG_FILE; fi
+
+#### Collect logs drom containers ####
+printf "Collecting containers error/access logs\n"
+if [ "${CONTAINER_ENV}" == "docker" ];then
+	id_list=$(docker ps | grep -v Restarting  | awk 'NR>1{print $1}')
+        echo "${id_list}" > $TMPFILE
+        while read ID; do
+		log=$(docker logs "$ID" --since $(date "+%FT%T" -d "${SINCE}") | grep -v "^\[")
+                echo "${log}" >>$ACCESS_LOG_FILE
+		log=$(docker logs "$ID" --since $(date "+%FT%T" -d "${SINCE}") | grep "^\[")
+                echo "${log}" >>$ERROR_LOG_FILE
+        done < $TMPFILE
+fi
+
+
+#### Collect logs from syslog ####
+keywords="(falco|openpolicyagent|OPA|dockerd|containerd)"
+awk "/$(date "+%B %d %T" -d "${SINCE}")/" ${SYSLOG_FILE} ; tail ${SYSLOG_FILE} | cut -f 5- -d ' ' >$TMPFILE2
+
+## Falco log
+printf "collecting falco logs\n"
+falco_log=$(tail -n300 "${TMPFILE2}" | grep "falco:")
+printf "<falco><![CDATA[" >>$LOGFILE
+printf "" >$FALCO_LOG_FILE
+if [ ! "${falco_log}" == "" ];then
+                printf "${falco_log}" >$FALCO_LOG_FILE
+                echo "${falco_log}" >>$LOGFILE 
+fi
+printf "]]></falco>\n" >>$LOGFILE
+
+## OpenPolicyAgent ##
+printf "collecting OPA logs\n"
+opa=$(cut -f 2- -d ' ' "${TMPFILE2}" | tail -n300 | grep "OPA")
+printf "<opa><![CDATA[" >>$LOGFILE
+if [ ! "${opa}" == "" ];then 
+	stolarize "${opa}" ":opa:"
+	printf "\n$(< $TMPFILE)\n" >$OPA_LOG_FILE
+	echo "\n$(< $TMPFILE)\n" >>$LOGFILE
+fi
+printf "]]></opa>\n" >>$LOGFILE
+
+# EOF
+
