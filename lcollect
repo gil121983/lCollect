@@ -11,7 +11,7 @@ VERSION="1.0"
 ### overide variables from .conf file for testings
 #CONTAINER_ENV="docker"
 #SYSLOGi_FILE="/var/log/syslog"
-SINCE="60 min ago" ## new variable - add to secopx.conf
+SINCE="10 min ago" ## new variable - add to secopx.conf
 ###
 
 ## Break operation if there are missing parameters
@@ -64,22 +64,22 @@ fi
 
 #### Collect logs from syslog ####
 keywords="(falco|openpolicyagent|OPA|dockerd|containerd)"
-awk "/$(date "+%B %d %T" -d "${SINCE}")/" ${SYSLOG_FILE} ; tail ${SYSLOG_FILE} | cut -f 5- -d ' ' >$TMPFILE2
+sed -n "/^$(date --date="${SINCE}" '+%b %_d %H:%M')/,\$p" ${SYSLOG_FILE} | cut -f 5- -d ' ' | egrep -wi "${keywords}" >$TMPFILE2
 
 ## Falco log
 printf "collecting falco logs\n"
-falco_log=$(tail -n300 "${TMPFILE2}" | grep "falco:")
+falco_log=$(cat "${TMPFILE2}" | grep "^falco")
 printf "<falco><![CDATA[" >>$LOGFILE
 printf "" >$FALCO_LOG_FILE
 if [ ! "${falco_log}" == "" ];then
                 printf "${falco_log}" >$FALCO_LOG_FILE
-                echo "${falco_log}" >>$LOGFILE 
+                echo "\n${falco_log}\n" >>$LOGFILE 
 fi
 printf "]]></falco>\n" >>$LOGFILE
 
 ## OpenPolicyAgent ##
 printf "collecting OPA logs\n"
-opa=$(cut -f 2- -d ' ' "${TMPFILE2}" | tail -n300 | grep "OPA")
+opa=$(cut -f 2- -d ' ' "${TMPFILE2}"  | egrep "(OPA|openpolicyagent)")
 printf "<opa><![CDATA[" >>$LOGFILE
 if [ ! "${opa}" == "" ];then 
 	stolarize "${opa}" ":opa:"
